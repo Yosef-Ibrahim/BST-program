@@ -33,6 +33,9 @@ To run the project from the source code, make sure you have a C++ compiler (like
 ### 🪟 For Windows (MinGW):
 Make sure `raylib.dll` and `libraylibdll.a` are in the same directory, then run:
 ```bash
+#Go to directory
+cd BST-program
+
 # Compile the source code
 g++ BST.cpp -o BST.exe -O2 -Wall -Wno-missing-braces -I . -L . -lraylibdll -lopengl32 -lgdi32 -lwinmm
 
