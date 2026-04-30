@@ -18,11 +18,11 @@ Here is the main interface showing a complex, color-coded AVL tree after multipl
 
 ### 🎥 Demo & Explanation
 Watch a full walkthrough of the visualizer, the features, and the underlying logic:
-👉 **[Click Here to Watch the Demo Video](INSERT_YOUR_YOUTUBE_LINK_HERE)**
+👉 **[Click Here to Watch the Demo Video](https://drive.google.com/file/d/1B0DHb24SYJK5_JyOJ12DgDxbOxc1J7y3/view?usp=sharing)**
 
 ### 📥 Download & Play
-Want to try it out without compiling? Download the ready-to-use executable:
-👉 **[Download the Latest Release (Windows .exe)](INSERT_YOUR_DOWNLOAD_LINK_HERE)**
+How to setup the program:
+👉 **[Coming Soon]()**
 
 ---
 
