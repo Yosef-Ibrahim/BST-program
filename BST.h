@@ -2,17 +2,13 @@
 #define BST_H
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  BST.h  —  AVL Tree with full animation support
-//  Fixed:
-//    • snapNewNodesToCurrent: now actually snaps BEFORE first rebuildPositions
-//      so new nodes don't fly in from (0,0)
-//    • insert() order fixed: insert → rebuildPositions → snap
-//    • getPredecessor/getSuccessor: return type changed to int (no magic T(-1))
-//    • getBalance: handles nullptr children safely
-//    • tickNode: alpha fade-in speed tied properly to lerpSpeed
-//    • Removed dead/empty snapNewNodes(root) call
-//    • collectAll / getAllValues: made fully public
-//    • formatVector: uses const ref to avoid copy
+//  BST.h  —  AVL Tree with smooth animations & correct Reingold-Tilford layout
+//
+//  FIX #3  (CRITICAL): Replaced naive halving-spacing with a proper
+//           Reingold-Tilford-inspired layout that computes the actual
+//           contour of each subtree and separates them by exactly
+//           NODE_SEP pixels.  No more crossing or overlapping edges
+//           even for 80+ node trees.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include <iostream>
@@ -21,10 +17,11 @@
 #include <string>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <functional>
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Node struct  —  carries logical data + animation state
+//  Node — data + animation state
 // ─────────────────────────────────────────────────────────────────────────────
 template <typename T>
 struct Node {
@@ -33,162 +30,140 @@ struct Node {
     Node* right  = nullptr;
     int   height = 1;
 
-    // ── Smooth-motion fields ─────────────────────────────────────────────
-    float cur_x = 0.f;   // current rendered position  (lerps towards target)
+    // Smooth-motion
+    float cur_x = 0.f;
     float cur_y = 0.f;
-    float tgt_x = 0.f;   // logical target position
+    float tgt_x = 0.f;
     float tgt_y = 0.f;
 
-    // ── Visual state ─────────────────────────────────────────────────────
-    bool  isNew        = false; // freshly inserted  → pulse ring
-    bool  isRotating   = false; // currently in a rotation → glow
-    float alpha        = 0.f;  // 0..1 opacity  (new nodes fade in)
-    float pulseTimer   = 0.f;  // counts down after insert
-    float highlightVal = 0.f;  // 0..1 rotation glow intensity
+    // Visual state
+    bool  isNew        = false;
+    bool  isRotating   = false;
+    float alpha        = 0.f;   // 0->1, new nodes fade in
+    float pulseTimer   = 0.f;
+    float highlightVal = 0.f;
+
+    // Reingold-Tilford layout scratch fields
+    float prelim  = 0.f;
+    float mod     = 0.f;
 
     explicit Node(T val) : data(val) {}
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  BST  (self-balancing AVL)
+//  BST (self-balancing AVL)
 // ─────────────────────────────────────────────────────────────────────────────
 template <typename T>
 class BST {
 public:
-    // ── Public search-path (for yellow path highlight) ────────────────────
     std::vector<T> searchPath;
 
-    // ── Ctor / Dtor ───────────────────────────────────────────────────────
     BST()  : root(nullptr) {}
     ~BST() { destroyTree(root); }
 
     Node<T>* getRoot() { return root; }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  Core public API
-    // ─────────────────────────────────────────────────────────────────────
+    void clearTree()  { destroyTree(root); root = nullptr; }
 
-    void clearTree() {
-        destroyTree(root);
-        root = nullptr;
-    }
-
-    int getNodeCount()  const { return countNodesRec(root); }
+    int getNodeCount()  const { return countRec(root); }
     int getTreeHeight() const { return root ? root->height : 0; }
 
-    // Insert a value; fills msg with rotation description (if any)
     void insert(T val, std::string& msg) {
         msg  = "";
         root = insertRec(root, val, msg);
-        // 1. Rebuild logical positions first
         rebuildPositions();
-        // 2. Snap brand-new nodes to their target so they don't slide from (0,0)
         snapNewNodesToCurrent();
     }
 
-    // Delete a value; fills msg with rotation description (if any)
     void remove(T val, std::string& msg) {
         msg  = "";
         root = deleteRec(root, val, msg);
         rebuildPositions();
     }
 
-    // Call once per frame from your game-loop
     void tickAnimations(float dt, float lerpSpeed) {
         tickNode(root, dt, lerpSpeed);
     }
 
-    // Rebuild all tgt_x / tgt_y based on current tree shape
-    void rebuildPositions(float startSpacing = 320.f) {
-        assignPositions(root, 0.f, 0.f, startSpacing);
+    // ─────────────────────────────────────────────────────────────────────
+    //  Reingold-Tilford layout — guarantees no overlaps for any tree size
+    // ─────────────────────────────────────────────────────────────────────
+    void rebuildPositions() {
+        if (!root) return;
+        firstWalk(root);
+        secondWalk(root, 0.f, 0);
     }
 
-    // Snap cur_x/cur_y → tgt_x/tgt_y for any node whose alpha is near 0
-    // (i.e. just-created nodes that have never been rendered yet)
-    void snapNewNodesToCurrent() {
-        snapNew(root);
-    }
+    void snapNewNodesToCurrent() { snapNew(root); }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  Predecessor / Successor
-    //  Returns the value, or -1 (cast to T) when not found.
-    // ─────────────────────────────────────────────────────────────────────
+    // ── Predecessor / Successor ───────────────────────────────────────────
     T getPredecessor(T val) {
         searchPath.clear();
-        Node<T>* current     = root;
-        Node<T>* predecessor = nullptr;
-
-        while (current) {
-            searchPath.push_back(current->data);
-            if (val < current->data) {
-                current = current->left;
-            } else if (val > current->data) {
-                predecessor = current;
-                current     = current->right;
+        Node<T>* cur  = root;
+        Node<T>* pred = nullptr;
+        while (cur) {
+            searchPath.push_back(cur->data);
+            if (val < cur->data) {
+                cur = cur->left;
+            } else if (val > cur->data) {
+                pred = cur;
+                cur  = cur->right;
             } else {
-                // Found exact node — predecessor is the max of the left subtree
-                if (current->left) {
-                    Node<T>* temp = maxValueNode(current->left);
-                    searchPath.push_back(temp->data);
-                    return temp->data;
+                if (cur->left) {
+                    Node<T>* t = maxNode(cur->left);
+                    searchPath.push_back(t->data);
+                    return t->data;
                 }
                 break;
             }
         }
-        return predecessor ? predecessor->data : T(-1);
+        return pred ? pred->data : T(-1);
     }
 
     T getSuccessor(T val) {
         searchPath.clear();
-        Node<T>* current   = root;
-        Node<T>* successor = nullptr;
-
-        while (current) {
-            searchPath.push_back(current->data);
-            if (val < current->data) {
-                successor = current;
-                current   = current->left;
-            } else if (val > current->data) {
-                current = current->right;
+        Node<T>* cur  = root;
+        Node<T>* succ = nullptr;
+        while (cur) {
+            searchPath.push_back(cur->data);
+            if (val < cur->data) {
+                succ = cur;
+                cur  = cur->left;
+            } else if (val > cur->data) {
+                cur = cur->right;
             } else {
-                // Found exact node — successor is the min of the right subtree
-                if (current->right) {
-                    Node<T>* temp = minValueNode(current->right);
-                    searchPath.push_back(temp->data);
-                    return temp->data;
+                if (cur->right) {
+                    Node<T>* t = minNode(cur->right);
+                    searchPath.push_back(t->data);
+                    return t->data;
                 }
                 break;
             }
         }
-        return successor ? successor->data : T(-1);
+        return succ ? succ->data : T(-1);
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  Traversal strings
-    // ─────────────────────────────────────────────────────────────────────
-    std::string getPreOrderString()     const { std::vector<T> v; preOrderVec(root, v);   return formatVector(v); }
-    std::string getInOrderString()      const { std::vector<T> v; inOrderVec(root, v);    return formatVector(v); }
-    std::string getPostOrderString()    const { std::vector<T> v; postOrderVec(root, v);  return formatVector(v); }
+    // ── Traversal strings ─────────────────────────────────────────────────
+    std::string getPreOrderString()     const { std::vector<T> v; preV(root,v);   return fmt(v); }
+    std::string getInOrderString()      const { std::vector<T> v; inV(root,v);    return fmt(v); }
+    std::string getPostOrderString()    const { std::vector<T> v; postV(root,v);  return fmt(v); }
     std::string getBreadthFirstString() const {
         std::vector<T> v;
         if (root) {
             std::queue<Node<T>*> q;
             q.push(root);
             while (!q.empty()) {
-                Node<T>* cur = q.front(); q.pop();
-                v.push_back(cur->data);
-                if (cur->left)  q.push(cur->left);
-                if (cur->right) q.push(cur->right);
+                auto* n = q.front(); q.pop();
+                v.push_back(n->data);
+                if (n->left)  q.push(n->left);
+                if (n->right) q.push(n->right);
             }
         }
-        return formatVector(v);
+        return fmt(v);
     }
 
-    // Collect all values in the tree (used for deduplication in random gen)
     std::vector<T> getAllValues() const {
-        std::vector<T> v;
-        collectAll(root, v);
-        return v;
+        std::vector<T> v; collectAll(root, v); return v;
     }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -197,248 +172,216 @@ private:
 
     Node<T>* root;
 
-    // ── Height / balance ──────────────────────────────────────────────────
-    int getHeight(Node<T>* n)  const { return n ? n->height : 0; }
-    int getBalance(Node<T>* n) const {
-        return n ? getHeight(n->left) - getHeight(n->right) : 0;
-    }
-    void updateHeight(Node<T>* n) {
-        if (n) n->height = 1 + std::max(getHeight(n->left), getHeight(n->right));
+    // Minimum horizontal gap between any two adjacent nodes at the same level
+    static constexpr float NODE_SEP  = 68.f;
+    static constexpr float LEVEL_SEP = 92.f;
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Reingold-Tilford  (contour-based, Walker 1990 binary variant)
+    //
+    //  Phase 1 (firstWalk): compute a preliminary x for every node relative
+    //  to its parent, ensuring siblings don't overlap by measuring the
+    //  right contour of the left subtree vs the left contour of the right.
+    //
+    //  Phase 2 (secondWalk): propagate accumulated modifiers top-down to
+    //  get the absolute tgt_x for every node.
+    // ══════════════════════════════════════════════════════════════════════
+
+    // Collect the rightmost x values at each depth under `n`
+    void rightContour(Node<T>* n, float modAcc, int depth,
+                      std::vector<float>& cont) {
+        if (!n) return;
+        float absX = n->prelim + modAcc;
+        if ((int)cont.size() <= depth) cont.push_back(absX);
+        else                           cont[depth] = std::max(cont[depth], absX);
+        rightContour(n->left,  modAcc + n->mod, depth + 1, cont);
+        rightContour(n->right, modAcc + n->mod, depth + 1, cont);
     }
 
-    // ── Min / Max ─────────────────────────────────────────────────────────
-    Node<T>* minValueNode(Node<T>* node) const {
-        while (node && node->left) node = node->left;
-        return node;
-    }
-    Node<T>* maxValueNode(Node<T>* node) const {
-        while (node && node->right) node = node->right;
-        return node;
+    // Collect the leftmost x values at each depth under `n`
+    void leftContour(Node<T>* n, float modAcc, int depth,
+                     std::vector<float>& cont) {
+        if (!n) return;
+        float absX = n->prelim + modAcc;
+        if ((int)cont.size() <= depth) cont.push_back(absX);
+        else                           cont[depth] = std::min(cont[depth], absX);
+        leftContour(n->left,  modAcc + n->mod, depth + 1, cont);
+        leftContour(n->right, modAcc + n->mod, depth + 1, cont);
     }
 
-    // ── Rotations ─────────────────────────────────────────────────────────
-    Node<T>* rightRotate(Node<T>* y) {
-        Node<T>* x  = y->left;
-        Node<T>* T2 = x->right;
-        x->right = y;
-        y->left  = T2;
-        updateHeight(y);
-        updateHeight(x);
-        y->isRotating = true;  y->highlightVal = 1.f;
-        x->isRotating = true;  x->highlightVal = 1.f;
+    void firstWalk(Node<T>* n) {
+        n->prelim = 0.f;
+        n->mod    = 0.f;
+
+        if (!n->left && !n->right) return;  // leaf
+
+        if (n->left)  firstWalk(n->left);
+        if (n->right) firstWalk(n->right);
+
+        if (n->left && n->right) {
+            // Measure how far apart we need the two subtrees
+            std::vector<float> rc, lc;
+            rightContour(n->left,  0.f, 0, rc);
+            leftContour (n->right, 0.f, 0, lc);
+
+            float shift = 0.f;
+            int   levels = (int)std::min(rc.size(), lc.size());
+            for (int i = 0; i < levels; ++i)
+                shift = std::max(shift, (rc[i] - lc[i]) + NODE_SEP);
+
+            if (shift < NODE_SEP) shift = NODE_SEP;
+
+            // Place left child at -shift/2, right at +shift/2
+            n->left->prelim  = -shift * 0.5f;
+            n->right->prelim =  shift * 0.5f;
+            // mod carries the offset down into the subtree
+            n->left->mod     = n->left->prelim;
+            n->right->mod    = n->right->prelim;
+            n->prelim        = 0.f;  // parent is centred
+
+        } else if (n->left) {
+            // Only left child — parent sits above it
+            n->prelim = n->left->prelim;
+        } else {
+            // Only right child
+            n->prelim = n->right->prelim;
+        }
+    }
+
+    // Phase 2: walk top-down, adding accumulated modifiers
+    void secondWalk(Node<T>* n, float modAcc, int depth) {
+        if (!n) return;
+        n->tgt_x = n->prelim + modAcc;
+        n->tgt_y = depth * LEVEL_SEP;
+        secondWalk(n->left,  modAcc + n->mod, depth + 1);
+        secondWalk(n->right, modAcc + n->mod, depth + 1);
+    }
+
+    // ── AVL helpers ───────────────────────────────────────────────────────
+    int  h (Node<T>* n) const { return n ? n->height : 0; }
+    int  bf(Node<T>* n) const { return n ? h(n->left) - h(n->right) : 0; }
+    void uh(Node<T>* n)       { if (n) n->height = 1 + std::max(h(n->left), h(n->right)); }
+
+    Node<T>* minNode(Node<T>* n) const { while (n && n->left)  n = n->left;  return n; }
+    Node<T>* maxNode(Node<T>* n) const { while (n && n->right) n = n->right; return n; }
+
+    Node<T>* rotR(Node<T>* y) {
+        Node<T>* x = y->left; Node<T>* t = x->right;
+        x->right = y; y->left = t;
+        uh(y); uh(x);
+        y->isRotating = x->isRotating = true;
+        y->highlightVal = x->highlightVal = 1.f;
         return x;
     }
-
-    Node<T>* leftRotate(Node<T>* x) {
-        Node<T>* y  = x->right;
-        Node<T>* T2 = y->left;
-        y->left  = x;
-        x->right = T2;
-        updateHeight(x);
-        updateHeight(y);
-        x->isRotating = true;  x->highlightVal = 1.f;
-        y->isRotating = true;  y->highlightVal = 1.f;
+    Node<T>* rotL(Node<T>* x) {
+        Node<T>* y = x->right; Node<T>* t = y->left;
+        y->left = x; x->right = t;
+        uh(x); uh(y);
+        x->isRotating = y->isRotating = true;
+        x->highlightVal = y->highlightVal = 1.f;
         return y;
     }
 
-    // ── Recursive insert ──────────────────────────────────────────────────
-    Node<T>* insertRec(Node<T>* node, T val, std::string& msg) {
-        if (!node) {
-            Node<T>* n   = new Node<T>(val);
-            n->isNew     = true;
-            n->pulseTimer = 1.4f;
-            n->alpha     = 0.f;   // will fade in via tickNode
-            return n;
+    // ── Insert ────────────────────────────────────────────────────────────
+    Node<T>* insertRec(Node<T>* n, T val, std::string& msg) {
+        if (!n) {
+            auto* nd = new Node<T>(val);
+            nd->isNew = true; nd->pulseTimer = 1.4f; nd->alpha = 0.f;
+            return nd;
         }
-        if      (val < node->data) node->left  = insertRec(node->left,  val, msg);
-        else if (val > node->data) node->right = insertRec(node->right, val, msg);
-        else                       return node; // duplicate — silently ignored
+        if      (val < n->data) n->left  = insertRec(n->left,  val, msg);
+        else if (val > n->data) n->right = insertRec(n->right, val, msg);
+        else                    return n;
 
-        updateHeight(node);
-        int balance = getBalance(node);
-
-        // ── AVL rebalance cases ──────────────────────────────────────────
-        if (balance > 1  && val < node->left->data) {
-            msg = "Right Rotation";
-            return rightRotate(node);
-        }
-        if (balance < -1 && val > node->right->data) {
-            msg = "Left Rotation";
-            return leftRotate(node);
-        }
-        if (balance > 1  && val > node->left->data) {
-            msg = "Left-Right Rotation";
-            node->left = leftRotate(node->left);
-            return rightRotate(node);
-        }
-        if (balance < -1 && val < node->right->data) {
-            msg = "Right-Left Rotation";
-            node->right = rightRotate(node->right);
-            return leftRotate(node);
-        }
-        return node;
+        uh(n);
+        int b = bf(n);
+        if (b > 1  && val < n->left->data)  { msg = "Right Rotation";      return rotR(n); }
+        if (b < -1 && val > n->right->data) { msg = "Left Rotation";       return rotL(n); }
+        if (b > 1  && val > n->left->data)  { msg = "Left-Right Rotation"; n->left  = rotL(n->left);  return rotR(n); }
+        if (b < -1 && val < n->right->data) { msg = "Right-Left Rotation"; n->right = rotR(n->right); return rotL(n); }
+        return n;
     }
 
-    // ── Recursive delete ──────────────────────────────────────────────────
-    Node<T>* deleteRec(Node<T>* node, T val, std::string& msg) {
-        if (!node) return nullptr;
-
-        if      (val < node->data) node->left  = deleteRec(node->left,  val, msg);
-        else if (val > node->data) node->right = deleteRec(node->right, val, msg);
+    // ── Delete ────────────────────────────────────────────────────────────
+    Node<T>* deleteRec(Node<T>* n, T val, std::string& msg) {
+        if (!n) return nullptr;
+        if      (val < n->data) n->left  = deleteRec(n->left,  val, msg);
+        else if (val > n->data) n->right = deleteRec(n->right, val, msg);
         else {
-            // Node to delete found
-            if (!node->left || !node->right) {
-                Node<T>* child = node->left ? node->left : node->right;
-                if (!child) {
-                    // Leaf node
-                    delete node;
-                    return nullptr;
-                } else {
-                    // One child — copy and delete
-                    *node = *child;
-                    delete child;
-                }
+            if (!n->left || !n->right) {
+                Node<T>* child = n->left ? n->left : n->right;
+                if (!child) { delete n; return nullptr; }
+                *n = *child; delete child;
             } else {
-                // Two children — replace with in-order successor
-                Node<T>* successor = minValueNode(node->right);
-                node->data         = successor->data;
-                node->right        = deleteRec(node->right, successor->data, msg);
+                Node<T>* s = minNode(n->right);
+                n->data    = s->data;
+                n->right   = deleteRec(n->right, s->data, msg);
             }
         }
-
-        if (!node) return nullptr;
-
-        updateHeight(node);
-        int balance = getBalance(node);
-
-        // ── AVL rebalance cases after delete ────────────────────────────
-        if (balance > 1  && getBalance(node->left) >= 0) {
-            msg = "Right Rotation (rebalance)";
-            return rightRotate(node);
-        }
-        if (balance > 1  && getBalance(node->left) < 0) {
-            msg = "Left-Right Rotation (rebalance)";
-            node->left = leftRotate(node->left);
-            return rightRotate(node);
-        }
-        if (balance < -1 && getBalance(node->right) <= 0) {
-            msg = "Left Rotation (rebalance)";
-            return leftRotate(node);
-        }
-        if (balance < -1 && getBalance(node->right) > 0) {
-            msg = "Right-Left Rotation (rebalance)";
-            node->right = rightRotate(node->right);
-            return leftRotate(node);
-        }
-        return node;
+        if (!n) return nullptr;
+        uh(n);
+        int b = bf(n);
+        if (b > 1  && bf(n->left)  >= 0) { msg = "Right Rotation (rebalance)";      return rotR(n); }
+        if (b > 1  && bf(n->left)  <  0) { msg = "Left-Right Rotation (rebalance)"; n->left  = rotL(n->left);  return rotR(n); }
+        if (b < -1 && bf(n->right) <= 0) { msg = "Left Rotation (rebalance)";       return rotL(n); }
+        if (b < -1 && bf(n->right) >  0) { msg = "Right-Left Rotation (rebalance)"; n->right = rotR(n->right); return rotL(n); }
+        return n;
     }
 
-    // ── Destroy ───────────────────────────────────────────────────────────
-    void destroyTree(Node<T>* node) {
-        if (!node) return;
-        destroyTree(node->left);
-        destroyTree(node->right);
-        delete node;
+    void destroyTree(Node<T>* n) {
+        if (!n) return;
+        destroyTree(n->left); destroyTree(n->right); delete n;
     }
 
-    // ── Count ─────────────────────────────────────────────────────────────
-    int countNodesRec(Node<T>* node) const {
-        if (!node) return 0;
-        return 1 + countNodesRec(node->left) + countNodesRec(node->right);
+    int countRec(Node<T>* n) const {
+        return n ? 1 + countRec(n->left) + countRec(n->right) : 0;
     }
 
-    // ── Position assignment ───────────────────────────────────────────────
-    void assignPositions(Node<T>* node, float x, float y, float spacing) {
-        if (!node) return;
-        node->tgt_x = x;
-        node->tgt_y = y;
-        float half = std::max(40.f, spacing * 0.5f);
-        assignPositions(node->left,  x - spacing, y + 90.f, half);
-        assignPositions(node->right, x + spacing, y + 90.f, half);
-    }
-
-    // ── Snap new (alpha≈0) nodes to their target immediately ─────────────
     void snapNew(Node<T>* n) {
         if (!n) return;
-        if (n->isNew && n->alpha < 0.05f) {
-            n->cur_x = n->tgt_x;
-            n->cur_y = n->tgt_y;
-        }
-        snapNew(n->left);
-        snapNew(n->right);
+        if (n->isNew && n->alpha < 0.05f) { n->cur_x = n->tgt_x; n->cur_y = n->tgt_y; }
+        snapNew(n->left); snapNew(n->right);
     }
 
-    // ── Per-frame tick: lerp position + animate timers ────────────────────
     void tickNode(Node<T>* n, float dt, float lerpSpeed) {
         if (!n) return;
-
-        // Exponential smoothing (frame-rate independent)
         float t  = 1.f - std::exp(-lerpSpeed * dt);
-        n->cur_x = n->cur_x + (n->tgt_x - n->cur_x) * t;
-        n->cur_y = n->cur_y + (n->tgt_y - n->cur_y) * t;
+        n->cur_x += (n->tgt_x - n->cur_x) * t;
+        n->cur_y += (n->tgt_y - n->cur_y) * t;
 
-        // Fade-in for newly inserted nodes
-        if (n->alpha < 1.f) {
+        if (n->alpha < 1.f)
             n->alpha = std::min(1.f, n->alpha + dt * lerpSpeed * 0.35f);
-        }
 
-        // Pulse timer countdown
         if (n->pulseTimer > 0.f) {
             n->pulseTimer -= dt;
-            if (n->pulseTimer <= 0.f) {
-                n->pulseTimer = 0.f;
-                n->isNew      = false;
-            }
+            if (n->pulseTimer <= 0.f) { n->pulseTimer = 0.f; n->isNew = false; }
         }
-
-        // Rotation glow fade
         if (n->highlightVal > 0.f) {
-            n->highlightVal -= dt * 0.9f;  // slow fade so user can see it
-            if (n->highlightVal <= 0.f) {
-                n->highlightVal = 0.f;
-                n->isRotating   = false;
-            }
+            n->highlightVal -= dt * 0.9f;
+            if (n->highlightVal <= 0.f) { n->highlightVal = 0.f; n->isRotating = false; }
         }
-
-        tickNode(n->left,  dt, lerpSpeed);
+        tickNode(n->left, dt, lerpSpeed);
         tickNode(n->right, dt, lerpSpeed);
     }
 
-    // ── Traversal helpers ─────────────────────────────────────────────────
-    void preOrderVec (Node<T>* n, std::vector<T>& v) const {
+    void preV (Node<T>* n, std::vector<T>& v) const { if (!n) return; v.push_back(n->data); preV(n->left,v);  preV(n->right,v);  }
+    void inV  (Node<T>* n, std::vector<T>& v) const { if (!n) return; inV(n->left,v);  v.push_back(n->data); inV(n->right,v);   }
+    void postV(Node<T>* n, std::vector<T>& v) const { if (!n) return; postV(n->left,v); postV(n->right,v); v.push_back(n->data); }
+    void collectAll(Node<T>* n, std::vector<T>& v) const {
         if (!n) return;
         v.push_back(n->data);
-        preOrderVec(n->left, v);
-        preOrderVec(n->right, v);
-    }
-    void inOrderVec  (Node<T>* n, std::vector<T>& v) const {
-        if (!n) return;
-        inOrderVec(n->left, v);
-        v.push_back(n->data);
-        inOrderVec(n->right, v);
-    }
-    void postOrderVec(Node<T>* n, std::vector<T>& v) const {
-        if (!n) return;
-        postOrderVec(n->left, v);
-        postOrderVec(n->right, v);
-        v.push_back(n->data);
+        collectAll(n->left,  v);
+        collectAll(n->right, v);
     }
 
-    void collectAll(Node<T>* n, std::vector<T>& out) const {
-        if (!n) return;
-        out.push_back(n->data);
-        collectAll(n->left,  out);
-        collectAll(n->right, out);
-    }
-
-    std::string formatVector(const std::vector<T>& vec) const {
-        if (vec.empty()) return "[ Empty Tree ]";
-        std::string res = "[ ";
-        for (size_t i = 0; i < vec.size(); ++i) {
-            res += std::to_string(vec[i]);
-            if (i + 1 < vec.size()) res += ",  ";
+    std::string fmt(const std::vector<T>& v) const {
+        if (v.empty()) return "[ Empty Tree ]";
+        std::string s = "[ ";
+        for (size_t i = 0; i < v.size(); ++i) {
+            s += std::to_string(v[i]);
+            if (i + 1 < v.size()) s += ",  ";
         }
-        return res + " ]";
+        return s + " ]";
     }
 };
 
