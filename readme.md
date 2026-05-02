@@ -28,16 +28,19 @@ How to setup the program:
 
 ## 🚀 How to Build and Run
 
-To run the project from the source code, make sure you have a C++ compiler (like GCC/MinGW) and the Raylib library installed.
+This project uses **CMake** for a clean, automated, and cross-platform build process. To build the project from source, ensure you have a C++ compiler (like GCC/MinGW) and [CMake](https://cmake.org/download/) installed on your system.
 
 ### 🪟 For Windows (MinGW):
-Make sure `raylib.dll` and `libraylibdll.a` are in the same directory, then run:
-```bash
-#Go to directory
-cd BST-program
 
-# Compile the source code
-g++ BST.cpp -o BST.exe -O2 -Wall -Wno-missing-braces -I . -L . -lraylibdll -lopengl32 -lgdi32 -lwinmm
+1. Open your terminal (PowerShell or Command Prompt) in the root directory of the project (`BST-program`).
+2. **Generate the build environment:**
+   ```powershell
+   cmake -S . -B build -G "MinGW Makefiles"
+   ```
+3. **Build project:**
+    ```powershell
+    cmake --build build
+    ```
 
 # Run the executable
 .\BST.exe
