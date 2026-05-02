@@ -10,6 +10,16 @@ A professional, interactive educational tool built from scratch with **C++** and
 
 ---
 
+## 🌐 Try the Web Version (Live Now!)
+Don't want to download anything? You can try the fully functional **Web Version** of this visualizer directly in your browser!
+
+👉 **[Play the Web Version Here](https://avl-bst-web-visualizer.vercel.app/)**
+
+Want to see how the web version was built?
+👉 **[Check out the Web Version Source Code Repository](https://github.com/Yosef-Ibrahim/BonusProjectUsing-Web.git)**
+
+---
+
 ## 🌟 Visual Showcase
 
 Here is the main interface showing a complex, color-coded AVL tree after multiple insertions, proving how it maintains its balance automatically.
@@ -20,9 +30,9 @@ Here is the main interface showing a complex, color-coded AVL tree after multipl
 Watch a full walkthrough of the visualizer, the features, and the underlying logic:
 👉 **[Click Here to Watch the Demo Video](https://drive.google.com/file/d/1B0DHb24SYJK5_JyOJ12DgDxbOxc1J7y3/view?usp=sharing)**
 
-### 📥 Download & Play
-How to setup the program:
-👉 **[Coming Soon]()**
+### 📥 Download & Play (Ready-to-Run)
+No need to build from source! Download the fully compiled executable and start playing immediately:
+👉 **[Download the Program Here](https://drive.google.com/file/d/1ReoDFQydiifctR0UClH2APA6tFsfUx1V/view?usp=sharing)**
 
 ---
 
@@ -36,14 +46,8 @@ This project uses **CMake** for a clean, automated, and cross-platform build pro
 2. **Generate the build environment:**
    ```powershell
    cmake -S . -B build -G "MinGW Makefiles"
-   ```
-3. **Build project:**
-    ```powershell
-    cmake --build build
-    ```
-
-# Run the executable
-.\BST.exe
+Build project:PowerShellcmake --build build
+Run the executable:PowerShell.\BST.exe
 🐧 For Linux:Make sure Raylib is installed on your system, then run:Bash# Compile the source code
 g++ BST.cpp -o avl_visualizer -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
 
