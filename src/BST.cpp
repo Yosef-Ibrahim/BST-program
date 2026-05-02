@@ -7,10 +7,9 @@
 //  FIX #4  — Negative number input: keyboard handler intercepts '-' key
 // ═══════════════════════════════════════════════════════════════════════════════
 
-#include "raylib.h"
-#define RAYGUI_IMPLEMENTATION
-#include "raygui.h"
-#include "BST.h"
+#include <raylib.h>
+#include <raygui.h>
+#include <BST.h>
 
 #include <string>
 #include <algorithm>
