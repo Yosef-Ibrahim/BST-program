@@ -1,4 +1,6 @@
 #pragma once
+#include <algorithm>
+
 #include <raylib.h>
 
 class CameraController {
