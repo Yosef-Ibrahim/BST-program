@@ -12,6 +12,7 @@ public:
                         int screenWidth, int screenHeight, int panelWidth);
 
 private:
-    void drawNodeRecursive(Node<int>* node, int lvl, const std::vector<int>& path, const Theme& theme, 
-                                     float canvasWidth, float verticalSpacing);
+    void drawNodeRecursive(Node<int>* node, int lvl, const std::vector<int>& path,
+                                     const Theme& theme,
+                                     float spanX, float spanY, float radius) ;
 };

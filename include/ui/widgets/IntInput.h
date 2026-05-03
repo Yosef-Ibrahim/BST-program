@@ -1,24 +1,20 @@
 #pragma once
 #include <string>
 #include <raylib.h>
-#include <ThemeManager.h>
+#include <ui/ThemeManager.h>
+#include <utility/DrawHelpers.h>
 
 class IntInput {
 public:
-    IntInput(const std::string& defaultVal = "0");
-
+    IntInput();
+    
+    bool update(Rectangle bounds); 
+    void draw(Rectangle bounds, const Theme& theme);
+    
     int getValue() const;
-    
-    // Call every frame; returns true if Enter was pressed
-    bool update();
-    
-    // Draw the input box; returns true when clicked to acquire focus
-    bool draw(int x, int y, int w, int h, const Theme& theme);
-
-    void setFocus(bool isFocused);
-    bool hasFocus() const;
+    void clear();
 
 private:
-    std::string buf;
-    bool focus;
+    std::string text;
+    bool isActive;
 };

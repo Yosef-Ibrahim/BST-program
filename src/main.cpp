@@ -1,9 +1,11 @@
 #include <core/App.h>
 
 int main() {
-    App visualizer(1280, 820, "AVL Tree Visualizer | Educational Edition");
+    // Instantiate the application (Width, Height, Title)
+    App app(1000, 950, "AVL Tree Visualizer | Educational Edition");
     
-    visualizer.run(); 
+    // Start the game loop
+    app.run();
     
     return 0;
 }

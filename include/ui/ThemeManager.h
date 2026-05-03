@@ -1,24 +1,32 @@
 #pragma once
 #include <raylib.h>
 
+#include <string>
+#include <fstream>
+#include <iostream>
+#include <vector>
+
 struct Theme {
-    Color bg, panel, panelEdge;
-    Color accent, accent2, success, danger;
-    Color textMain, textDim;
-    Color nodeShadow, edgeCol;
-    bool isNight;
+    Color bg;
+    Color panel;
+    Color accent;
+    Color success;
+    Color error;
+    Color textMain;
+    Color textMuted;
+    Color edgeCol;
 };
 
 class ThemeManager {
 public:
     ThemeManager();
     
-    void toggleMode();
     const Theme& getCurrentTheme() const;
-    bool isNightMode() const;
+
+    bool loadFromFile(const std::string& filepath);
+
+    void saveToFile();
 
 private:
-    bool nightMode;
-    Theme nightTheme;
-    Theme lightTheme;
+    Theme currentTheme;
 };
